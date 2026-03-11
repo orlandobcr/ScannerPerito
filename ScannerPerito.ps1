@@ -373,41 +373,36 @@ function Get-MachineInfo {
     )
 
     # Usuario que inicio sesion en Windows (el real, no el elevado)
-    # Obtener del proceso explorer.exe que siempre corre como el usuario de sesion
-    $loggedOnUser = ""
-    $loggedOnUserFull = ""
+    # Usa quser que es instantaneo y devuelve el usuario activo de la consola
+    $loggedOnUser = "$env:USERDOMAIN\$env:USERNAME"
+    $loggedOnUserFull = $env:USERNAME
     try {
-        $explorerProc = Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($explorerProc) {
-            $ownerInfo = Invoke-CimMethod -InputObject $explorerProc -MethodName GetOwner -ErrorAction SilentlyContinue
-            if ($ownerInfo -and $ownerInfo.User) {
-                $loggedOnUser = "$($ownerInfo.Domain)\$($ownerInfo.User)"
-                $sessionUsername = $ownerInfo.User
-                $sessionDomain = $ownerInfo.Domain
+        $quserOutput = quser 2>$null
+        if ($quserOutput) {
+            $activeLine = $quserOutput | Where-Object { $_ -match 'Active|Activo' } | Select-Object -First 1
+            if ($activeLine -and $activeLine -match '^\s*>?\s*(\S+)') {
+                $activeUser = $Matches[1]
+                if (-not [string]::IsNullOrWhiteSpace($activeUser)) {
+                    $loggedOnUser = "$env:USERDOMAIN\$activeUser"
+                    $loggedOnUserFull = $activeUser
+                }
             }
         }
     } catch {}
 
-    # Fallback: usar variables de entorno originales de la sesion
-    if ([string]::IsNullOrWhiteSpace($loggedOnUser)) {
-        $loggedOnUser = "$env:USERDOMAIN\$env:USERNAME"
-        $sessionUsername = $env:USERNAME
-        $sessionDomain = $env:USERDOMAIN
-    }
-
-    # Nombre completo del usuario de sesion (metodo rapido via net user)
+    # Nombre completo: usar whoami que es instantaneo
     try {
-        $netUserOutput = net user $sessionUsername 2>$null
-        if ($netUserOutput) {
-            $fullNameLine = $netUserOutput | Where-Object { $_ -match '^\s*(Full Name|Nombre completo)\s+' }
-            if ($fullNameLine) {
-                $loggedOnUserFull = ($fullNameLine -replace '^\s*(Full Name|Nombre completo)\s+', '').Trim()
-            }
+        $whoamiInfo = whoami /user /fo csv 2>$null | ConvertFrom-Csv -ErrorAction SilentlyContinue
+        # No da nombre completo, pero confirma la cuenta
+    } catch {}
+
+    # Intentar obtener nombre completo del registro de Windows (instantaneo)
+    try {
+        $regFullName = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI" -Name "LastLoggedOnDisplayName" -ErrorAction SilentlyContinue).LastLoggedOnDisplayName
+        if (-not [string]::IsNullOrWhiteSpace($regFullName)) {
+            $loggedOnUserFull = $regFullName
         }
     } catch {}
-    if ([string]::IsNullOrWhiteSpace($loggedOnUserFull)) {
-        $loggedOnUserFull = $sessionUsername
-    }
 
     return [PSCustomObject]@{
         Hostname       = $env:COMPUTERNAME
@@ -558,9 +553,9 @@ function Start-FileScan {
 
             # Progreso
             if ($stats.ProcessedCount % $PROGRESS_INTERVAL -eq 0) {
-                Write-Progress -Activity "Escaneando archivos..." `
-                    -Status "$($stats.ProcessedCount) elementos procesados | Archivos: $($stats.TotalFiles) | Carpetas: $($stats.TotalDirs)" `
-                    -PercentComplete -1
+                $statusText = "$($stats.ProcessedCount) procesados | Archivos: $($stats.TotalFiles) | Carpetas: $($stats.TotalDirs) | Errores: $($stats.TotalErrors)"
+                Write-Progress -Activity "Escaneando archivos..." -Status $statusText -CurrentOperation $item.FullName
+                Write-Host "`r  $statusText" -NoNewline -ForegroundColor DarkGray
             }
 
             $isDir    = $item.PSIsContainer
@@ -638,6 +633,7 @@ function Start-FileScan {
         }
 
     Write-Progress -Activity "Escaneando archivos..." -Completed
+    Write-Host ""
 
     # Registrar errores de acceso a carpetas
     if ($scanErrors) {
