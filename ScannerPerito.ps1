@@ -117,9 +117,6 @@ function Read-Configuration {
             forensic_examiner = "Nombre del Perito Informatico"
             examiner_id       = "Cedula o identificacion del perito"
             examiner_license  = "Numero de tarjeta profesional"
-            case_number       = "Numero del caso o expediente"
-            case_description  = "Descripcion breve del caso"
-            authority         = "Autoridad solicitante (Juzgado, Fiscalia, etc.)"
             notes             = ""
         }
 
@@ -132,15 +129,106 @@ function Read-Configuration {
     $config = Get-Content -Path $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
 
     # Validar campos requeridos
-    $requiredFields = @('entity_name', 'forensic_examiner', 'case_number')
+    $requiredFields = @('entity_name', 'forensic_examiner')
     foreach ($field in $requiredFields) {
         $value = $config.$field
-        if ([string]::IsNullOrWhiteSpace($value) -or $value -match '^Nombre|^Numero') {
+        if ([string]::IsNullOrWhiteSpace($value) -or $value -match '^Nombre') {
             Write-Host "  AVISO: El campo '$field' en config.json parece no estar configurado." -ForegroundColor Yellow
         }
     }
 
     return $config
+}
+
+# ============================================================================
+# 2b. NUMERO DE CASO (SEED AUTO-INCREMENTAL)
+# ============================================================================
+
+function Get-NextCaseNumber {
+    $seedPath = Join-Path $PSScriptRoot "case_seed.json"
+
+    if (Test-Path $seedPath) {
+        $seed = Get-Content -Path $seedPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $nextNumber = [int]$seed.last_case_number + 1
+    }
+    else {
+        $nextNumber = 1
+    }
+
+    return [PSCustomObject]@{
+        SeedPath   = $seedPath
+        CaseNumber = $nextNumber
+        CaseId     = "SP-{0:D6}" -f $nextNumber
+    }
+}
+
+function Save-CaseNumber {
+    param(
+        [string]$SeedPath,
+        [int]$CaseNumber,
+        [string]$CaseId,
+        [string]$CaseDescription,
+        [string]$Timestamp
+    )
+
+    # Cargar historial existente o crear nuevo
+    if (Test-Path $SeedPath) {
+        $seed = Get-Content -Path $SeedPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $history = @()
+        if ($seed.history) {
+            $history = @($seed.history)
+        }
+    }
+    else {
+        $history = @()
+    }
+
+    # Agregar entrada al historial
+    $entry = @{
+        case_id     = $CaseId
+        case_number = $CaseNumber
+        description = $CaseDescription
+        timestamp   = $Timestamp
+    }
+    $history += $entry
+
+    $seedData = @{
+        last_case_number = $CaseNumber
+        last_updated     = $Timestamp
+        history          = $history
+    }
+
+    $seedData | ConvertTo-Json -Depth 5 | Out-File -FilePath $SeedPath -Encoding utf8 -Force
+}
+
+# ============================================================================
+# 2c. DESCRIPCION DEL CASO (INPUT DEL USUARIO)
+# ============================================================================
+
+function Read-CaseDescription {
+    param([string]$CaseId)
+
+    Write-Host ""
+    Write-Host "  ============================================" -ForegroundColor Cyan
+    Write-Host "    DATOS DEL CASO" -ForegroundColor Cyan
+    Write-Host "  ============================================" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  Numero de caso asignado: $CaseId" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "  Ingrese la descripcion del caso." -ForegroundColor White
+    Write-Host "  Ejemplo: Extraccion de evidencia digital del disco duro del equipo" -ForegroundColor DarkGray
+    Write-Host "           de escritorio asignado al area de contabilidad, solicitada" -ForegroundColor DarkGray
+    Write-Host "           por la Fiscalia General dentro del proceso 2026-00123." -ForegroundColor DarkGray
+    Write-Host ""
+
+    do {
+        $description = Read-Host "  Descripcion"
+        if ([string]::IsNullOrWhiteSpace($description)) {
+            Write-Host "  La descripcion no puede estar vacia. Intente de nuevo." -ForegroundColor Red
+        }
+    } while ([string]::IsNullOrWhiteSpace($description))
+
+    return $description
 }
 
 # ============================================================================
@@ -648,7 +736,9 @@ function New-ForensicReport {
         [string]$EndTime,
         [PSCustomObject]$ScanStats,
         [PSCustomObject]$ExportResult,
-        [string]$DataFileHash
+        [string]$DataFileHash,
+        [string]$CaseId,
+        [string]$CaseDescription
     )
 
     $reportPath = Join-Path $OutputDir "ScannerPerito_Report_$Timestamp.txt"
@@ -674,9 +764,9 @@ function New-ForensicReport {
     $writer.WriteLine("PERITO INFORMATICO:  $($Config.forensic_examiner)")
     $writer.WriteLine("IDENTIFICACION:      $($Config.examiner_id)")
     $writer.WriteLine("TARJETA PROFESIONAL: $($Config.examiner_license)")
-    $writer.WriteLine("CASO No.:            $($Config.case_number)")
-    $writer.WriteLine("DESCRIPCION:         $($Config.case_description)")
-    $writer.WriteLine("AUTORIDAD:           $($Config.authority)")
+    $writer.WriteLine("")
+    $writer.WriteLine("CASO No.:            $CaseId")
+    $writer.WriteLine("DESCRIPCION:         $CaseDescription")
     $writer.WriteLine("")
 
     # --- INFORMACION DEL EQUIPO ---
@@ -828,7 +918,12 @@ Write-Host ""
 
 # 2. Cargar configuracion
 $config = Read-Configuration
-Write-Host ""
+
+# 2b. Generar numero de caso
+$caseInfo = Get-NextCaseNumber
+
+# 2c. Pedir descripcion del caso
+$caseDescription = Read-CaseDescription -CaseId $caseInfo.CaseId
 
 # 3. Seleccion de unidad
 $driveLetter = Show-DriveSelectionMenu
@@ -850,7 +945,9 @@ Write-Host "  ============================================" -ForegroundColor Cya
 Write-Host "    RESUMEN ANTES DE INICIAR" -ForegroundColor Cyan
 Write-Host "  ============================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  Caso:       $($config.case_number)" -ForegroundColor White
+Write-Host "  Caso:       $($caseInfo.CaseId)" -ForegroundColor White
+Write-Host "  Descripcion:" -ForegroundColor White
+Write-Host "    $caseDescription" -ForegroundColor DarkGray
 Write-Host "  Perito:     $($config.forensic_examiner)" -ForegroundColor White
 Write-Host "  Equipo:     $($machineInfo.Hostname)" -ForegroundColor White
 Write-Host "  Disco:      $($diskInfo.DiskModel) ($($diskInfo.DiskSizeFormatted))" -ForegroundColor White
@@ -866,9 +963,15 @@ if ($confirm -notin @('S','s','SI','si','Si','Y','y','YES','yes')) {
     exit 0
 }
 
-# 8. Preparar directorio de salida
+# 8. Persistir numero de caso y preparar directorio de salida
 $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
-$outputDir = Join-Path $PSScriptRoot "ScannerPerito_$timestamp"
+Save-CaseNumber -SeedPath $caseInfo.SeedPath `
+    -CaseNumber $caseInfo.CaseNumber `
+    -CaseId $caseInfo.CaseId `
+    -CaseDescription $caseDescription `
+    -Timestamp (Get-Date -Format 'yyyy-MM-dd HH:mm:ss K')
+
+$outputDir = Join-Path $PSScriptRoot "ScannerPerito_$($caseInfo.CaseId)_$timestamp"
 New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
 
 # Iniciar log
@@ -937,7 +1040,9 @@ $reportResult = New-ForensicReport `
     -EndTime $endTime `
     -ScanStats $scanStats `
     -ExportResult $exportResult `
-    -DataFileHash $dataFileHash
+    -DataFileHash $dataFileHash `
+    -CaseId $caseInfo.CaseId `
+    -CaseDescription $caseDescription
 
 Write-Log -Message "Informe generado: $($reportResult.ReportPath)" -LogWriter $logWriter
 Write-Log -Message "Hash del informe ($HASH_ALGORITHM): $($reportResult.ReportHash)" -LogWriter $logWriter

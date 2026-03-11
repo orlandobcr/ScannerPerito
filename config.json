@@ -8,8 +8,5 @@
   "forensic_examiner": "Nombre del Perito Informatico",
   "examiner_id": "Cedula o identificacion del perito",
   "examiner_license": "Numero de tarjeta profesional",
-  "case_number": "Numero del caso o expediente",
-  "case_description": "Descripcion breve del caso",
-  "authority": "Autoridad solicitante (Juzgado, Fiscalia, etc.)",
   "notes": ""
 }
