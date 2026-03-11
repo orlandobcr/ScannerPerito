@@ -1,5 +1,8 @@
 # Output folders
 ScannerPerito_*/
 
+# Runtime state
+case_seed.json
+
 # Claude internal
 .claude/
