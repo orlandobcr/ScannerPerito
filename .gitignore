@@ -1,0 +1,5 @@
+# Output folders
+ScannerPerito_*/
+
+# Claude internal
+.claude/
