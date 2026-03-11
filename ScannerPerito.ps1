@@ -114,9 +114,8 @@ function Read-Configuration {
             city              = "Ciudad"
             phone             = "+57 XXX XXX XXXX"
             email             = "contacto@entidad.com"
-            forensic_examiner = "Nombre del Perito Informatico"
-            examiner_id       = "Cedula o identificacion del perito"
-            examiner_license  = "Numero de tarjeta profesional"
+            author            = "Nombre del Perito / Autor del Informe"
+            author_id         = "Cedula o identificacion"
             notes             = ""
         }
 
@@ -129,7 +128,7 @@ function Read-Configuration {
     $config = Get-Content -Path $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
 
     # Validar campos requeridos
-    $requiredFields = @('entity_name', 'forensic_examiner')
+    $requiredFields = @('entity_name', 'author')
     foreach ($field in $requiredFields) {
         $value = $config.$field
         if ([string]::IsNullOrWhiteSpace($value) -or $value -match '^Nombre') {
@@ -761,9 +760,8 @@ function New-ForensicReport {
     $writer.WriteLine("TELEFONO:            $($Config.phone)")
     $writer.WriteLine("EMAIL:               $($Config.email)")
     $writer.WriteLine("")
-    $writer.WriteLine("PERITO INFORMATICO:  $($Config.forensic_examiner)")
-    $writer.WriteLine("IDENTIFICACION:      $($Config.examiner_id)")
-    $writer.WriteLine("TARJETA PROFESIONAL: $($Config.examiner_license)")
+    $writer.WriteLine("PERITO / AUTOR:      $($Config.author)")
+    $writer.WriteLine("IDENTIFICACION:      $($Config.author_id)")
     $writer.WriteLine("")
     $writer.WriteLine("CASO No.:            $CaseId")
     $writer.WriteLine("DESCRIPCION:         $CaseDescription")
@@ -948,7 +946,7 @@ Write-Host ""
 Write-Host "  Caso:       $($caseInfo.CaseId)" -ForegroundColor White
 Write-Host "  Descripcion:" -ForegroundColor White
 Write-Host "    $caseDescription" -ForegroundColor DarkGray
-Write-Host "  Perito:     $($config.forensic_examiner)" -ForegroundColor White
+Write-Host "  Autor:      $($config.author)" -ForegroundColor White
 Write-Host "  Equipo:     $($machineInfo.Hostname)" -ForegroundColor White
 Write-Host "  Disco:      $($diskInfo.DiskModel) ($($diskInfo.DiskSizeFormatted))" -ForegroundColor White
 Write-Host "  Volumen:    $($diskInfo.VolumeLetter): - $($diskInfo.VolumeLabel) ($($diskInfo.FileSystem))" -ForegroundColor White

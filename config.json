@@ -5,8 +5,7 @@
   "city": "Ciudad",
   "phone": "+57 XXX XXX XXXX",
   "email": "contacto@entidad.com",
-  "forensic_examiner": "Nombre del Perito Informatico",
-  "examiner_id": "Cedula o identificacion del perito",
-  "examiner_license": "Numero de tarjeta profesional",
+  "author": "Nombre del Perito / Autor del Informe",
+  "author_id": "Cedula o identificacion",
   "notes": ""
 }
