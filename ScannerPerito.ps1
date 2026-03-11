@@ -395,14 +395,14 @@ function Get-MachineInfo {
         $sessionDomain = $env:USERDOMAIN
     }
 
-    # Nombre completo del usuario de sesion
+    # Nombre completo del usuario de sesion (metodo rapido via net user)
     try {
-        $userObj = Get-CimInstance Win32_UserAccount -Filter "Name='$sessionUsername'" -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($userObj -and $userObj.FullName) {
-            $loggedOnUserFull = $userObj.FullName
-        }
-        if ([string]::IsNullOrWhiteSpace($loggedOnUserFull)) {
-            $loggedOnUserFull = ([adsi]"WinNT://$sessionDomain/$sessionUsername,user").FullName
+        $netUserOutput = net user $sessionUsername 2>$null
+        if ($netUserOutput) {
+            $fullNameLine = $netUserOutput | Where-Object { $_ -match '^\s*(Full Name|Nombre completo)\s+' }
+            if ($fullNameLine) {
+                $loggedOnUserFull = ($fullNameLine -replace '^\s*(Full Name|Nombre completo)\s+', '').Trim()
+            }
         }
     } catch {}
     if ([string]::IsNullOrWhiteSpace($loggedOnUserFull)) {
