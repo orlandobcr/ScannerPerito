@@ -366,10 +366,48 @@ function Get-MachineInfo {
             }
         }
 
-    $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    # Usuario de ejecucion (puede ser admin si se elevo con "Ejecutar como administrador")
+    $executionUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
     $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
         [Security.Principal.WindowsBuiltInRole]::Administrator
     )
+
+    # Usuario que inicio sesion en Windows (el real, no el elevado)
+    # Obtener del proceso explorer.exe que siempre corre como el usuario de sesion
+    $loggedOnUser = ""
+    $loggedOnUserFull = ""
+    try {
+        $explorerProc = Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($explorerProc) {
+            $ownerInfo = Invoke-CimMethod -InputObject $explorerProc -MethodName GetOwner -ErrorAction SilentlyContinue
+            if ($ownerInfo -and $ownerInfo.User) {
+                $loggedOnUser = "$($ownerInfo.Domain)\$($ownerInfo.User)"
+                $sessionUsername = $ownerInfo.User
+                $sessionDomain = $ownerInfo.Domain
+            }
+        }
+    } catch {}
+
+    # Fallback: usar variables de entorno originales de la sesion
+    if ([string]::IsNullOrWhiteSpace($loggedOnUser)) {
+        $loggedOnUser = "$env:USERDOMAIN\$env:USERNAME"
+        $sessionUsername = $env:USERNAME
+        $sessionDomain = $env:USERDOMAIN
+    }
+
+    # Nombre completo del usuario de sesion
+    try {
+        $userObj = Get-CimInstance Win32_UserAccount -Filter "Name='$sessionUsername'" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($userObj -and $userObj.FullName) {
+            $loggedOnUserFull = $userObj.FullName
+        }
+        if ([string]::IsNullOrWhiteSpace($loggedOnUserFull)) {
+            $loggedOnUserFull = ([adsi]"WinNT://$sessionDomain/$sessionUsername,user").FullName
+        }
+    } catch {}
+    if ([string]::IsNullOrWhiteSpace($loggedOnUserFull)) {
+        $loggedOnUserFull = $sessionUsername
+    }
 
     return [PSCustomObject]@{
         Hostname       = $env:COMPUTERNAME
@@ -379,8 +417,10 @@ function Get-MachineInfo {
         OSArchitecture = $os.OSArchitecture
         Domain         = $cs.Domain
         DomainRole     = $cs.DomainRole
-        CurrentUser    = $currentUser
-        IsAdmin        = $isAdmin
+        LoggedOnUser     = $loggedOnUser
+        LoggedOnUserFull = $loggedOnUserFull
+        ExecutionUser    = $executionUser
+        IsAdmin          = $isAdmin
         CPUName        = $cpu.Name
         CPUCores       = $cpu.NumberOfCores
         CPULogical     = $cpu.NumberOfLogicalProcessors
@@ -763,6 +803,12 @@ function New-ForensicReport {
     $writer.WriteLine("PERITO / AUTOR:      $($Config.author)")
     $writer.WriteLine("IDENTIFICACION:      $($Config.author_id)")
     $writer.WriteLine("")
+    $writer.WriteLine("EJECUTADO POR:")
+    $writer.WriteLine("  Sesion Windows:    $($MachineInfo.LoggedOnUser)")
+    $writer.WriteLine("  Nombre Completo:   $($MachineInfo.LoggedOnUserFull)")
+    $writer.WriteLine("  Cuenta Ejecucion:  $($MachineInfo.ExecutionUser)")
+    $writer.WriteLine("  Administrador:     $(if ($MachineInfo.IsAdmin) { 'SI' } else { 'NO' })")
+    $writer.WriteLine("")
     $writer.WriteLine("CASO No.:            $CaseId")
     $writer.WriteLine("DESCRIPCION:         $CaseDescription")
     $writer.WriteLine("")
@@ -777,7 +823,8 @@ function New-ForensicReport {
     $writer.WriteLine("Version:             $($MachineInfo.OSVersion) (Build $($MachineInfo.OSBuild))")
     $writer.WriteLine("Arquitectura:        $($MachineInfo.OSArchitecture)")
     $writer.WriteLine("Dominio:             $($MachineInfo.Domain)")
-    $writer.WriteLine("Usuario Actual:      $($MachineInfo.CurrentUser)")
+    $writer.WriteLine("Usuario Sesion:      $($MachineInfo.LoggedOnUser) ($($MachineInfo.LoggedOnUserFull))")
+    $writer.WriteLine("Usuario Ejecucion:   $($MachineInfo.ExecutionUser)")
     $writer.WriteLine("Ejecutado como Admin:$(if ($MachineInfo.IsAdmin) { ' SI' } else { ' NO' })")
     $writer.WriteLine("CPU:                 $($MachineInfo.CPUName)")
     $writer.WriteLine("  Nucleos Fisicos:   $($MachineInfo.CPUCores)")
